@@ -1,0 +1,57 @@
+#! /bin/bash
+
+EP_DEVICE_NAME=${EP_DEVICE_NAME:-ep0}
+EP_DEVICE=/dev/${EP_DEVICE_NAME}
+EP_DIR=${EP_DIR:-/ephemeral}
+TMP_DIR=${TMP_DIR:-${EP_DIR}/tmp}
+
+EPHEMERAL_DISKS="$(curl http://169.254.169.254/latest/meta-data/block-device-mapping/ 2>/dev/null | grep ephemeral)"
+EPHEMERAL_MOUNTED=""
+EPHEMERAL_MOUNTED_COUNT=0
+
+for ef in $EPHEMERAL_DISKS; do
+  ed=`curl http://169.254.169.254/latest/meta-data/block-device-mapping/$ef 2>/dev/null`
+
+  echo "Unmount: /dev/$ed"
+  /bin/umount /dev/$ed
+
+  echo "Format: /dev/$ed"
+  /sbin/mkfs.ext4 -f /dev/$ed
+
+  EPHEMERAL_MOUNTED="${EPHEMERAL_MOUNTED} /dev/$ed"
+  EPHEMERAL_MOUNTED_COUNT=$((EPHEMERAL_MOUNTED_COUNT + 1))
+done
+
+if [ $EPHEMERAL_MOUNTED_COUNT -eq 0 ]; then
+  exit 0
+fi
+
+echo "Create ${EP_DEVICE}"
+yes | /sbin/mdadm \
+      --create ${EP_DEVICE} \
+      --level=0 -c256 \
+      --force \
+      --raid-devices=${EPHEMERAL_MOUNTED_COUNT} ${EPHEMERAL_MOUNTED}
+
+[ $? -ne 0 ] && {
+  echo "Unable to create raid device: ${RAID_DEVICE}" 1>&2
+  exit 1
+}
+
+/sbin/blockdev --setra 65536 ${EP_DEVICE}
+echo "DEVICE ${EPHEMERAL_MOUNTED}" > /etc/mdadm.conf
+/sbin/mdadm --detail --scan >> /etc/mdadm.conf
+
+/sbin/mkfs.ext4 ${EP_DEVICE}
+
+/bin/mkdir -p ${EP_DIR}
+/bin/mount -t ext4 -o noatime ${EP_DEVICE} ${EP_DIR}
+/bin/chmod a+rwx ${EP_DIR}
+
+/bin/mkdir -p ${TMP_DIR}
+/bin/chmod a+rwx ${TMP_DIR}
+
+/bin/mv /tmp /tmp_old
+/bin/ln -s ${TMP_DIR} /tmp
+
+exit 0

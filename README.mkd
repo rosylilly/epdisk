@@ -1,0 +1,9 @@
+# epdisk
+
+Ephemeral disk を1つの RAID にまとめて /ephemral と /tmp に乗っけてくれるやつ。
+
+/tmp は正確には /ephemral/tmp の symlink になります。
+
+# License
+
+MIT
